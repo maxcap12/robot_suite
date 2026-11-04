@@ -15,6 +15,7 @@ class BtServerNode(Node):
     _bt_tick_freq: int = 60  # Hz
     _bt_name: str = "simple_bt"
     _stop_on_failure: bool = False
+    _print_tree: bool = True
     bt: Optional[BehaviourTree]
     _global_blackboard: Client
 
@@ -48,6 +49,7 @@ class BtServerNode(Node):
         self.declare_parameter("tick_freq", self._bt_tick_freq)
         self.declare_parameter("stop_on_failure", self._stop_on_failure)
         self.declare_parameter("plugins", [])
+        self.declare_parameter("print_tree", self._print_tree)
 
     def read_params(self):
         self._bt_name = self.get_parameter("bt_name").get_parameter_value().string_value
@@ -56,6 +58,9 @@ class BtServerNode(Node):
         )
         self._stop_on_failure = (
             self.get_parameter("stop_on_failure").get_parameter_value().bool_value
+        )
+        self._print_tree = (
+            self.get_parameter("print_tree").get_parameter_value().bool_value
         )
 
     def print_tree(self, tree: BehaviourTree):
@@ -72,7 +77,9 @@ class BtServerNode(Node):
                 continue
 
             try:
-                self.bt.tick(post_tick_handler=self.print_tree)
+                self.bt.tick(
+                    post_tick_handler=self.print_tree if self._print_tree else None
+                )
             except Exception as e:
                 self.get_logger().error(
                     f"A problem occured while ticking BT. Root Cause: {e}"

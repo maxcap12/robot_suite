@@ -30,6 +30,7 @@ bt_server:
         bt_name: go1_bt
         tick_freq: 60 # Hz
         stop_on_failure: false
+        print_tree: false # true prints the whole tree at every tick (60 Hz): floods the logs
 
 # Control station (pygame window): used to switch modes (h = hand, m = manual)
 # and to drive the robot with the keyboard in manual mode.
@@ -44,3 +45,8 @@ remote_controller:
         cam_image_topic_name: "/camera/camera/color/image_raw"
         takeoff_topic_name: "/stand_up" # `t` key -> stand up
         land_topic_name: "/stand_down" # `l` key -> stand down
+        # The Go1 driver switches the robot to walking mode on every /cmd_vel: a
+        # continuous (zero) cmd_vel stream interrupts stand up / stand down, and
+        # makes the robot jump up from lying down. So for the Go1:
+        continuous_cmd_vel: false # zero cmd_vel sent once when the keys are released
+        posture_transition_time: 2.0 # s, no cmd_vel while lying down and for 2 s after a stand up
