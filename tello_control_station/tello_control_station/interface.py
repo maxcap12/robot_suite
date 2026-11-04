@@ -30,7 +30,9 @@ matching_keys = {
 
 
 class Interface:
-    def __init__(self):
+    def __init__(self, commands_image: str = "commands.png"):
+        """commands_image: gesture table shown on the right, file name in the
+        package share directory or absolute path."""
         pygame.init()
         pygame.joystick.init()
 
@@ -51,7 +53,7 @@ class Interface:
         self.video_container = VideoContainer(self.display)
         pkg_path = get_package_share_directory("tello_control_station")
 
-        self.commands_img = pygame.image.load(os.path.join(pkg_path, "commands.png"))
+        self.commands_img = pygame.image.load(os.path.join(pkg_path, commands_image))
 
         self.font = pygame.font.SysFont("Comic Sans MS", 30)
 

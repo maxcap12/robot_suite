@@ -46,6 +46,7 @@ remote_controller:
         battery_msg_type: "unitree_ros/msg/BmsState"
         battery_field: "soc" # 0-100 %
         cam_image_topic_name: "/camera/camera/color/image_raw"
+        commands_image: "go1_commands.png" # Go1 gesture table (Tello one: commands.png)
         takeoff_topic_name: "/stand_up" # `t` key -> stand up
         land_topic_name: "/stand_down" # `l` key -> stand down
         # The Go1 driver switches the robot to walking mode on every /cmd_vel: a

@@ -110,6 +110,7 @@ The first build takes a while (PyTorch, MediaPipe, ...). Later builds reuse the 
 
     The window shows the robot battery (`soc` of `/bms_state`, published by the driver; 0 % until the driver is connected).
     The topic, message type and field are the `battery_*` parameters of `remote_controller` in `go1_params.yaml`.
+    The gesture table on the right is `tello_control_station/assets/go1_commands.png` (parameter `commands_image`), matching the [Gestures](#5-gestures) below.
 
 ## 5. Gestures
 

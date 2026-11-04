@@ -62,7 +62,7 @@ class ControlStation(Node):
         self.init_subsciptions()
         self.init_timers()
 
-        self.pg_interface = Interface()
+        self.pg_interface = Interface(self.commands_image)
 
     def init_publishers(self):
         self.key_pressed_publisher = self.create_publisher(
@@ -436,6 +436,11 @@ class ControlStation(Node):
         self.declare_parameter("cmd_topic_name", "/cmd_vel")
         self.declare_parameter("key_pressed_topic_name", "/key_pressed")
         self.declare_parameter("battery_level_topic_name", "/flight_data")
+        # Gesture table shown in the window (file in the package share dir, or absolute path)
+        self.declare_parameter("commands_image", "commands.png")
+        self.commands_image = (
+            self.get_parameter("commands_image").get_parameter_value().string_value
+        )
         # Message type and field (0-100 %) of the battery topic
         self.declare_parameter("battery_msg_type", "tello_msgs/msg/FlightStats")
         self.declare_parameter("battery_field", "battery_percentage")
