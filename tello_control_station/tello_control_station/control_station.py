@@ -10,10 +10,28 @@ from typing import Union, Tuple
 import json
 import threading
 import subprocess
+import time
 from ament_index_python import get_package_prefix
 
 
+def is_zero(cmd: Twist) -> bool:
+    return (
+        cmd.linear.x == 0.0
+        and cmd.linear.y == 0.0
+        and cmd.linear.z == 0.0
+        and cmd.angular.x == 0.0
+        and cmd.angular.y == 0.0
+        and cmd.angular.z == 0.0
+    )
+
+
 class ControlStation(Node):
+    # Some drivers (e.g. unitree_ros for the Go1) send a zero velocity command
+    # 0.4 s after the last cmd_vel, which interrupts a posture change. With
+    # `posture_transition_time` > 0, posture commands wait this long after the
+    # last cmd_vel.
+    posture_cmd_delay: float = 0.45  # s
+
     def __init__(self) -> None:
         super().__init__("remote_controller")
 
@@ -30,6 +48,14 @@ class ControlStation(Node):
         self.takeoff_publisher_topic_name = ""
         self.land_publisher_topic_name = ""
         self.skeleton_layer_subscriber_topic_name = "/hand/annotated/image"
+
+        # cmd_vel / posture state (see read_prameters for the related parameters)
+        self.last_cmd_vel_time = 0.0
+        self.last_cmd_was_zero = True
+        self.is_down = False
+        self.transition_end_time = 0.0
+        self.pending_posture = None  # "takeoff" or "land"
+        self.pressed_posture_inputs = set()
 
         self.read_prameters()
         self.init_publishers()
@@ -71,6 +97,13 @@ class ControlStation(Node):
         self.nlp_command_subscriber = self.create_subscription(
             String, "/switch_mode", self.switch_mode, 10
         )
+        # Track the posture from any source (keyboard, hand gestures, ...)
+        self.takeoff_subscriber = self.create_subscription(
+            Empty, self.takeoff_publisher_topic_name, self._on_takeoff, 1
+        )
+        self.land_subscriber = self.create_subscription(
+            Empty, self.land_publisher_topic_name, self._on_land, 1
+        )
 
     def init_timers(self):
         self.timer = self.create_timer(1 / 30, self.tick)
@@ -82,6 +115,84 @@ class ControlStation(Node):
         self.pg_interface.tick()
         self.get_keyboard_input()
         self.get_joystick_input()
+        self.process_pending_posture()
+
+    # ------------------------------------------------------------------ #
+    # cmd_vel / posture helpers
+    # ------------------------------------------------------------------ #
+    def _posture_gating(self) -> bool:
+        return self.posture_transition_time > 0.0
+
+    def _on_takeoff(self, _: Empty) -> None:
+        self.is_down = False
+        self.transition_end_time = time.monotonic() + self.posture_transition_time
+
+    def _on_land(self, _: Empty) -> None:
+        self.is_down = True
+
+    def _raw_publish_cmd_vel(self, msg: Twist) -> None:
+        self.cmd_vel_publisher.publish(msg)
+        self.last_cmd_vel_time = time.monotonic()
+        self.last_cmd_was_zero = is_zero(msg)
+
+    def publish_cmd_vel(self, msg: Twist) -> None:
+        """Publishes a velocity command, following the cmd_vel parameters.
+
+        - continuous_cmd_vel = false: a zero command is only published once
+          (when the motion stops), not continuously.
+        - posture_transition_time > 0: nothing is published while landed /
+          lying down, during posture_transition_time after a takeoff / stand
+          up, or while a posture command is waiting to be sent.
+        """
+        if self._posture_gating() and (
+            self.pending_posture is not None
+            or self.is_down
+            or time.monotonic() < self.transition_end_time
+        ):
+            return
+        if not self.continuous_cmd_vel and is_zero(msg) and self.last_cmd_was_zero:
+            return
+        self._raw_publish_cmd_vel(msg)
+
+    def request_posture(self, posture: str, pressed: bool) -> bool:
+        """Sends a takeoff / land (stand up / stand down) command once per press.
+
+        Returns whether the input is currently pressed.
+        """
+        if not pressed:
+            self.pressed_posture_inputs.discard(posture)
+            return False
+        if posture in self.pressed_posture_inputs:
+            return True  # still held: already sent
+        self.pressed_posture_inputs.add(posture)
+
+        if not self._posture_gating():
+            self._publish_posture(posture)
+            return True
+
+        # Stop the robot first, then send the command once the driver can't
+        # send a velocity command anymore (see posture_cmd_delay)
+        if not self.last_cmd_was_zero:
+            self._raw_publish_cmd_vel(Twist())
+        self.pending_posture = posture
+        self.process_pending_posture()
+        return True
+
+    def process_pending_posture(self) -> None:
+        if self.pending_posture is None:
+            return
+        if time.monotonic() - self.last_cmd_vel_time < self.posture_cmd_delay:
+            return
+        self._publish_posture(self.pending_posture)
+        self.pending_posture = None
+
+    def _publish_posture(self, posture: str) -> None:
+        if posture == "takeoff":
+            self.takeoff_publisher.publish(Empty())
+            self._on_takeoff(Empty())
+        else:
+            self.land_publisher.publish(Empty())
+            self._on_land(Empty())
 
     def get_nlp_input(self, mode_command: str):
         print(mode_command)
@@ -115,12 +226,10 @@ class ControlStation(Node):
     def get_keyboard_input(self):
         keys = self.pg_interface.get_key_pressed()
 
-        # START/STOP
-        if keys[matching_keys["t"]]:
-            self.takeoff_publisher.publish(Empty())
+        # START/STOP (one command per key press)
+        if self.request_posture("takeoff", keys[matching_keys["t"]]):
             return NodeState.RUNNING
-        if keys[matching_keys["l"]]:
-            self.land_publisher.publish(Empty())
+        if self.request_posture("land", keys[matching_keys["l"]]):
             return NodeState.RUNNING
 
         msg = String()
@@ -202,7 +311,7 @@ class ControlStation(Node):
             vel_msg.angular.z += 0.5
         if keys[matching_keys["right"]]:
             vel_msg.angular.z -= 0.5
-        self.cmd_vel_publisher.publish(vel_msg)
+        self.publish_cmd_vel(vel_msg)
 
     def nlp_terminal(self):
         """
@@ -275,12 +384,10 @@ class ControlStation(Node):
                 self.key_pressed_publisher.publish(msg)
                 return NodeState.SUCCESS
 
-            # START/STOP
-            if joystick.get_button(6):  # BACK
-                self.land_publisher.publish(Empty())
+            # START/STOP (one command per button press)
+            if self.request_posture("land", joystick.get_button(6)):  # BACK
                 return NodeState.RUNNING
-            if joystick.get_button(7):  # START
-                self.takeoff_publisher.publish(Empty())
+            if self.request_posture("takeoff", joystick.get_button(7)):  # START
                 return NodeState.RUNNING
 
             if joystick.get_button(8):  # LOGITECH
@@ -306,7 +413,7 @@ class ControlStation(Node):
                 -joystick.get_axis(0) if abs(joystick.get_axis(0)) > 0.05 else 0.0
             )
 
-            self.cmd_vel_publisher.publish(msg)
+            self.publish_cmd_vel(msg)
 
     def read_prameters(self):
         self.declare_parameter("cmd_topic_name", "/cmd_vel")
@@ -315,6 +422,20 @@ class ControlStation(Node):
         self.declare_parameter("cam_image_topic_name", "/camera/image_raw")
         self.declare_parameter("land_topic_name", "/land")
         self.declare_parameter("takeoff_topic_name", "/takeoff")
+        # false: publish a zero cmd_vel once when the motion stops instead of continuously
+        self.declare_parameter("continuous_cmd_vel", True)
+        # > 0: no cmd_vel while landed / lying down and for this long (s) after a
+        # takeoff / stand up, so the posture motion is not interrupted. 0 disables it.
+        self.declare_parameter("posture_transition_time", 0.0)
+
+        self.continuous_cmd_vel = (
+            self.get_parameter("continuous_cmd_vel").get_parameter_value().bool_value
+        )
+        self.posture_transition_time = (
+            self.get_parameter("posture_transition_time")
+            .get_parameter_value()
+            .double_value
+        )
 
         self.cmd_vel_publisher_topic_name = (
             self.get_parameter("cmd_topic_name").get_parameter_value().string_value

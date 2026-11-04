@@ -22,11 +22,33 @@ Gesture mapping (both hands must be visible, same as the Spot interpreter):
 
 Any other combination (or fewer than two hands) stops the robot.
 
+How the driver behaves (and why this class is written this way):
+
+- The driver re-sends its *last* command to the robot at 500 Hz, and every
+  ``/cmd_vel`` message switches the robot to walking mode. A ``/cmd_vel``
+  received right after a stand up/down command therefore interrupts the
+  posture transition (the robot jumps up into walking mode, fast and unstable).
+- 400 ms after the last ``/cmd_vel`` the driver itself sends a zero walking
+  command, which has the same effect.
+
+So:
+
+- ``/cmd_vel`` is only published while a motion gesture is held (at most
+  every ``publish_period``), plus one zero Twist when the motion stops.
+- Nothing is published while the robot is down, nor during
+  ``posture_transition_time`` after a stand up.
+- A stand up/down command is sent only once at least ``driver_reset_delay``
+  has passed since the last ``/cmd_vel`` (the robot is stopped first).
+- A stand up/down command is sent once per gesture (it must be released and
+  made again to send another one), and at most every ``posture_cooldown``
+  (a gesture held during the cooldown is sent when it ends).
+- The posture is also tracked from ``/stand_up`` and ``/stand_down``
+  published by other nodes (e.g. the control station `t` / `l` keys).
+
 Safety: velocity commands are only published while this behaviour is being
 ticked (i.e. while hand control mode is selected). When the BT stops ticking it
-(mode switched, detector failing, ...) a single zero Twist is published so the
-robot does not keep walking with the last command. Landmarks older than
-``landmarks_timeout`` seconds are ignored (robot stops).
+(mode switched, detector failing, ...) the robot is stopped if it was moving.
+Landmarks older than ``landmarks_timeout`` seconds are ignored (robot stops).
 """
 
 import time
@@ -39,6 +61,20 @@ from std_msgs.msg import Empty
 from hand_gestures_msgs.msg import Landmarks
 
 from robot_bt.behaviours.shared.actions import Action
+
+STAND_UP = "stand_up"
+STAND_DOWN = "stand_down"
+
+
+def is_zero(cmd: Twist) -> bool:
+    return (
+        cmd.linear.x == 0.0
+        and cmd.linear.y == 0.0
+        and cmd.linear.z == 0.0
+        and cmd.angular.x == 0.0
+        and cmd.angular.y == 0.0
+        and cmd.angular.z == 0.0
+    )
 
 
 class Go1GesturesInterpreterAction(Action):
@@ -58,6 +94,8 @@ class Go1GesturesInterpreterAction(Action):
     inactive_timeout: float = 0.3  # s, without ticks -> considered inactive
     publish_period: float = 1 / 20  # s, max rate for cmd_vel publishing
     posture_cooldown: float = 2.0  # s, min time between stand up/down commands
+    posture_transition_time: float = 2.0  # s, no cmd_vel after a stand up
+    driver_reset_delay: float = 0.45  # s, driver sends a zero walk cmd 0.4 s after the last cmd_vel
 
     def __init__(self, name: str, node: Optional[Node] = None) -> None:
         super().__init__(name=name, bt_node=node)
@@ -72,15 +110,28 @@ class Go1GesturesInterpreterAction(Action):
         self.stand_down_pub = self.node.create_publisher(
             Empty, self.stand_down_topic, 1
         )
-        self.watchdog = self.node.create_timer(0.1, self.watchdog_callback)
+        # Track the posture from any source (gestures, control station `t`/`l`
+        # keys, ...), otherwise standing up with the keyboard after a stand-down
+        # gesture would leave hand control blocked.
+        self.node.create_subscription(
+            Empty, self.stand_up_topic, self.stand_up_callback, 1
+        )
+        self.node.create_subscription(
+            Empty, self.stand_down_topic, self.stand_down_callback, 1
+        )
+        self.watchdog = self.node.create_timer(0.05, self.watchdog_callback)
 
         self.last_landmarks: Optional[Landmarks] = None
         self.last_landmarks_time = 0.0
         self.last_tick_time = 0.0
         self.last_publish_time = 0.0
-        self.last_posture_time = 0.0
+        self.last_cmd_was_zero = True
+        self.last_posture_time = -self.posture_cooldown
+        self.sent_posture_gesture: Optional[str] = None  # held, already sent
+        self.pending_posture: Optional[str] = None
+        self.transition_end_time = 0.0
         self.is_active = False
-        self.is_down = False
+        self.is_down = False  # the driver stands the robot up when it starts
 
     # ------------------------------------------------------------------ #
     # ROS callbacks
@@ -89,15 +140,61 @@ class Go1GesturesInterpreterAction(Action):
         self.last_landmarks = msg
         self.last_landmarks_time = time.monotonic()
 
+    def stand_up_callback(self, _: Empty) -> None:
+        self._set_standing_up(time.monotonic())
+
+    def stand_down_callback(self, _: Empty) -> None:
+        self.is_down = True
+
     def watchdog_callback(self) -> None:
-        """Stops the robot once when hand control stops being ticked."""
-        if (
-            self.is_active
-            and time.monotonic() - self.last_tick_time > self.inactive_timeout
-        ):
+        now = time.monotonic()
+        # A posture command requested just before leaving hand mode is still sent
+        self.process_pending_posture(now)
+
+        if self.is_active and now - self.last_tick_time > self.inactive_timeout:
             self.node.get_logger().info("Hand control inactive, stopping Go1")
-            self.cmd_vel_pub.publish(Twist())
+            self.stop_if_moving(now)
             self.is_active = False
+
+    # ------------------------------------------------------------------ #
+    # Command helpers
+    # ------------------------------------------------------------------ #
+    def publish_cmd_vel(self, cmd: Twist, now: float) -> None:
+        self.cmd_vel_pub.publish(cmd)
+        self.last_publish_time = now
+        self.last_cmd_was_zero = is_zero(cmd)
+
+    def stop_if_moving(self, now: float) -> None:
+        if not self.last_cmd_was_zero:
+            self.publish_cmd_vel(Twist(), now)
+
+    def _set_standing_up(self, now: float) -> None:
+        self.is_down = False
+        self.transition_end_time = now + self.posture_transition_time
+
+    def request_posture(self, posture: str, now: float) -> None:
+        self.node.get_logger().info(f"Go1: {posture.replace('_', ' ')} requested")
+        self.pending_posture = posture
+        self.last_posture_time = now
+        self.stop_if_moving(now)
+        self.process_pending_posture(now)
+
+    def process_pending_posture(self, now: float) -> None:
+        if self.pending_posture is None:
+            return
+        # Wait until the driver can't send its own zero walking command anymore
+        if now - self.last_publish_time < self.driver_reset_delay:
+            return
+
+        if self.pending_posture == STAND_UP:
+            self.node.get_logger().info("Go1: standing up")
+            self.stand_up_pub.publish(Empty())
+            self._set_standing_up(now)
+        else:
+            self.node.get_logger().info("Go1: standing down")
+            self.stand_down_pub.publish(Empty())
+            self.is_down = True
+        self.pending_posture = None
 
     # ------------------------------------------------------------------ #
     # Gesture handling
@@ -120,46 +217,57 @@ class Go1GesturesInterpreterAction(Action):
 
         return cmd
 
-    def handle_posture(self, left: str, right: str) -> None:
-        now = time.monotonic()
-        if now - self.last_posture_time < self.posture_cooldown:
-            return
-
+    @staticmethod
+    def gestures_to_posture(left: str, right: str) -> Optional[str]:
         if left == "Open_Palm" and right == "Thumb_Up":
-            self.node.get_logger().info("Go1: standing up")
-            self.stand_up_pub.publish(Empty())
-            self.is_down = False
-            self.last_posture_time = now
-        elif left == "Open_Palm" and right == "Thumb_Down":
-            self.node.get_logger().info("Go1: standing down")
-            self.cmd_vel_pub.publish(Twist())
-            self.stand_down_pub.publish(Empty())
-            self.is_down = True
-            self.last_posture_time = now
+            return STAND_UP
+        if left == "Open_Palm" and right == "Thumb_Down":
+            return STAND_DOWN
+        return None
 
     def update(self) -> py_trees.common.Status:
         now = time.monotonic()
         self.last_tick_time = now
         self.is_active = True
 
-        cmd = Twist()
+        left, right = "None", "None"
         msg = self.last_landmarks
-        fresh = msg is not None and now - self.last_landmarks_time < self.landmarks_timeout
+        if msg is not None and now - self.last_landmarks_time < self.landmarks_timeout:
+            if msg.left_hand.handedness != "":
+                left = msg.left_hand.gesture
+            if msg.right_hand.handedness != "":
+                right = msg.right_hand.gesture
 
-        if fresh:
-            left = msg.left_hand.gesture if msg.left_hand.handedness != "" else "None"
-            right = (
-                msg.right_hand.gesture if msg.right_hand.handedness != "" else "None"
-            )
-            if left != "None" and right != "None":
-                self.handle_posture(left, right)
-                cmd = self.gestures_to_twist(left, right)
+        # Stand up / down: once per gesture (it must be released before it can
+        # be sent again). A gesture made during the cooldown is sent when it ends.
+        posture = self.gestures_to_posture(left, right)
+        if posture != self.sent_posture_gesture:
+            self.sent_posture_gesture = None
+        if (
+            posture is not None
+            and self.sent_posture_gesture is None
+            and now - self.last_posture_time >= self.posture_cooldown
+        ):
+            self.request_posture(posture, now)
+            self.sent_posture_gesture = posture
+        self.process_pending_posture(now)
 
-        if self.is_down:
-            cmd = Twist()
+        # Don't send any velocity while a posture command is pending, while the
+        # robot is down or while it is standing up: it would interrupt the motion
+        if (
+            self.pending_posture is not None
+            or self.is_down
+            or now < self.transition_end_time
+        ):
+            return py_trees.common.Status.SUCCESS
 
-        if now - self.last_publish_time >= self.publish_period:
-            self.cmd_vel_pub.publish(cmd)
-            self.last_publish_time = now
+        cmd = Twist()
+        if left != "None" and right != "None":
+            cmd = self.gestures_to_twist(left, right)
+
+        if is_zero(cmd):
+            self.stop_if_moving(now)  # one zero Twist when the motion stops
+        elif now - self.last_publish_time >= self.publish_period:
+            self.publish_cmd_vel(cmd, now)
 
         return py_trees.common.Status.SUCCESS

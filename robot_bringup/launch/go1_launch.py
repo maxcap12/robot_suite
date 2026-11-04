@@ -16,7 +16,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -62,16 +62,24 @@ def create_realsense_launch(ld: LaunchDescription) -> None:
         )
     )
     realsense_pkg_dir = get_package_share_directory("realsense2_camera")
+    # Scoped group without forwarding: rs_launch.py warns about every launch
+    # argument it doesn't know (use_driver, wifi, ...) if they are forwarded.
     ld.add_action(
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(realsense_pkg_dir, "launch", "rs_launch.py")
-            ),
-            launch_arguments={
-                "enable_depth": "false",
-                "rgb_camera.color_profile": "640,480,30",
-            }.items(),
+        GroupAction(
+            scoped=True,
+            forwarding=False,
             condition=IfCondition(LaunchConfiguration("use_realsense")),
+            actions=[
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(
+                        os.path.join(realsense_pkg_dir, "launch", "rs_launch.py")
+                    ),
+                    launch_arguments={
+                        "enable_depth": "false",
+                        "rgb_camera.color_profile": "640,480,30",
+                    }.items(),
+                )
+            ],
         )
     )
 

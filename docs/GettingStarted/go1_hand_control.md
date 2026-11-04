@@ -69,7 +69,9 @@ The first build takes a while (PyTorch, MediaPipe, ...). Later builds reuse the 
 
 ## 4. Run
 
-1. Allow containers to open windows (once per login session):
+1. Display access: `docker compose` mounts the X11 cookie of your session (`$XAUTHORITY`) in the container,
+   so the control station window opens without extra steps. If `XAUTHORITY` is not set in your shell
+   (`echo $XAUTHORITY`), allow containers to open windows instead (once per login session):
 
     ```bash
     xhost +local:docker
@@ -123,7 +125,9 @@ Both hands must be visible to the camera. Any other combination, a single hand, 
 
 !!! warning "Safety"
 
-    - Velocity commands are only sent while hand mode is active. When you leave hand mode (or the BT stops ticking the gestures), one zero `Twist` is sent.
+    - Velocity commands are only sent while hand mode is active. When you leave hand mode (or the BT stops ticking the gestures), the robot is stopped.
+    - Stand up / stand down: one command per gesture or key press (holding it doesn't repeat it), at most every 2 s.
+    - While the robot is lying down, and during 2 s after a stand up, no velocity command is sent (gestures and `w`/`a`/`s`/`d` are ignored). Before a stand up/down the robot is stopped and the command waits ~0.5 s. This is needed because the driver switches the robot to walking mode on every `/cmd_vel` (and on its own 0.4 s after the last one), which would interrupt the posture change: the robot would jump up very fast and look unstable. These times are `posture_transition_time` (control station, `go1_params.yaml`) and the class attributes of `Go1GesturesInterpreterAction`.
     - If no new gesture arrives for 0.5 s (hand out of frame, camera disconnected...), the robot stops.
     - Default speeds are 0.3 m/s forward, 0.2 m/s sideways, 0.6 rad/s rotation. Change them at the top of `Go1GesturesInterpreterAction`.
     - Always keep the Unitree remote at hand to take over.
@@ -156,9 +160,11 @@ ros2 topic pub -r 10 /hand/landmarks hand_gestures_msgs/msg/Landmarks \
 
 | Problem | Fix |
 | ------- | --- |
-| `cannot open display` / pygame error | Run `xhost +local:docker` on the host and check that `DISPLAY` is set in the shell running `docker compose`. |
+| `Authorization required, but no authorization protocol specified`, `cannot open display` / no control station window | Check that `DISPLAY` and `XAUTHORITY` are set in the shell running `docker compose` (not with `sudo`, which drops them), or run `xhost +local:docker` on the host. Recreate the container after logging in again (`docker compose up --force-recreate go1_suite`): the cookie file changes at each login on Wayland. |
+| Logs flooded with the behaviour tree | Set `print_tree: true` only for debugging in `robot_bringup/config/go1_params.yaml` (`bt_server`), it prints the whole tree at every tick. |
 | RealSense not found | Plug it in **before** starting the container or restart it (`docker compose restart go1_suite`). Check with `rs-enumerate-devices` or `lsusb` inside the container. Use a USB 3 port/cable. |
 | Driver log shows `CONNECTION IS NOT AVAILABLE` and `process has died` | The robot is not reachable: check the cable/Wi‑Fi and `ping` the robot, use `wifi:=true` for Wi‑Fi, then restart the container. |
 | Driver running elsewhere doesn't receive commands | Same `ROS_DOMAIN_ID` on both sides, both with `--net=host`. See the notes in [Go1 driver](#2-go1-driver). |
 | Other robots/people on the same network receive the commands | Use a dedicated `ROS_DOMAIN_ID` (e.g. `ROS_DOMAIN_ID=42 docker compose up go1_suite`). |
+| Robot stands up abruptly / looks unstable when standing up | Something else publishes `/cmd_vel` continuously (check `ros2 topic info /cmd_vel -v`): any `/cmd_vel` interrupts the stand-up motion. |
 | Robot doesn't react to `/cmd_vel` | Make sure the robot is standing (`t` or the stand-up gesture) and that the driver is connected (check its logs). |

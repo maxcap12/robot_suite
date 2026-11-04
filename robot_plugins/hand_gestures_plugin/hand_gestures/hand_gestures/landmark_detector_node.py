@@ -122,7 +122,7 @@ class LandmarkDetectorNode(PluginNode):
         if msg is None:
             return
         msg.header = self.received_image_msg.header
-        print("msg.header: ",msg.header)
+        self.get_logger().debug(f"Publishing landmarks, header: {msg.header}")
         self.landmarks_pub.publish(msg)
 
         self.prev_image_msg = self.received_image_msg
