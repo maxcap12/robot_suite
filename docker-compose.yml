@@ -43,9 +43,13 @@ services:
             - DISPLAY=${DISPLAY}
             - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
             - FASTDDS_BUILTIN_TRANSPORTS=UDPv4 # avoid shared-memory issues with other containers
+            - XAUTHORITY=/root/.Xauthority
             #- RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
         volumes:
             - /tmp/.X11-unix:/tmp/.X11-unix
+            # X11 cookie of the host session: lets the GUI (control station) open without `xhost`.
+            # Falls back to /dev/null (no cookie) if XAUTHORITY is unset -> then run `xhost +local:docker`.
+            - ${XAUTHORITY:-/dev/null}:/root/.Xauthority:ro
             - /dev:/dev # RealSense (USB, hot-plug)
         privileged: true # needed for the RealSense USB access
         network_mode: "host"
