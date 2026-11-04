@@ -108,6 +108,9 @@ The first build takes a while (PyTorch, MediaPipe, ...). Later builds reuse the 
 
     The suite **starts in manual mode**: the robot doesn't move until you press `h`.
 
+    The window shows the robot battery (`soc` of `/bms_state`, published by the driver; 0 % until the driver is connected).
+    The topic, message type and field are the `battery_*` parameters of `remote_controller` in `go1_params.yaml`.
+
 ## 5. Gestures
 
 Both hands must be visible to the camera. Any other combination, a single hand, or no hand stops the robot.

@@ -41,7 +41,10 @@ remote_controller:
         matching_keys: []
         cmd_topic_name: "/cmd_vel"
         key_pressed_topic_name: "/key_pressed"
-        battery_level_topic_name: "/flight_data" # unused on Go1
+        # Battery shown in the window, published by the unitree_ros driver
+        battery_level_topic_name: "/bms_state"
+        battery_msg_type: "unitree_ros/msg/BmsState"
+        battery_field: "soc" # 0-100 %
         cam_image_topic_name: "/camera/camera/color/image_raw"
         takeoff_topic_name: "/stand_up" # `t` key -> stand up
         land_topic_name: "/stand_down" # `l` key -> stand down

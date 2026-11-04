@@ -11,6 +11,7 @@
   <depend>sensor_msgs</depend>
   <depend>tello_msgs</depend>
   <depend>geometry_msgs</depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
   <depend>plugin_server_base</depend>
   <depend>python3-numpy</depend>
   <depend>python3-pygame</depend>

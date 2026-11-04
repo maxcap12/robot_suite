@@ -1,7 +1,6 @@
 from rclpy.node import Node
 from std_msgs.msg import String, Empty, Bool, Float32
 from sensor_msgs.msg import Image
-from tello_msgs.msg import FlightStats
 from geometry_msgs.msg import Twist
 from plugin_base.plugin_base import NodeState
 from tello_control_station.interface import Interface, matching_keys
@@ -11,6 +10,7 @@ import json
 import threading
 import subprocess
 import time
+from rosidl_runtime_py.utilities import get_message
 from ament_index_python import get_package_prefix
 
 
@@ -79,12 +79,21 @@ class ControlStation(Node):
         )
 
     def init_subsciptions(self):
-        self.battery_subscriber = self.create_subscription(
-            FlightStats,
-            self.battery_subscriber_topic_name,
-            self._update_battery,
-            10,
-        )
+        # The battery message type is a parameter, loaded at runtime, so robots
+        # other than the Tello don't need tello_msgs-like dependencies at build time
+        try:
+            battery_msg_type = get_message(self.battery_msg_type)
+            self.battery_subscriber = self.create_subscription(
+                battery_msg_type,
+                self.battery_subscriber_topic_name,
+                self._update_battery,
+                10,
+            )
+        except (AttributeError, ModuleNotFoundError, ValueError) as e:
+            self.get_logger().warning(
+                f"Battery display disabled, unknown message type "
+                f"'{self.battery_msg_type}': {e}"
+            )
         self.cam_image_subscriber = self.create_subscription(
             Image, self.cam_image_subscriber_topic_name, self._update_bg, 1
         )
@@ -108,8 +117,16 @@ class ControlStation(Node):
     def init_timers(self):
         self.timer = self.create_timer(1 / 30, self.tick)
 
-    def _update_battery(self, msg: FlightStats):
-        self.pg_interface.update_battery(msg.battery_percentage)
+    def _update_battery(self, msg) -> None:
+        try:
+            battery = int(getattr(msg, self.battery_field))
+        except (AttributeError, TypeError, ValueError):
+            self.get_logger().warning(
+                f"No numeric field '{self.battery_field}' in {self.battery_msg_type}",
+                throttle_duration_sec=10.0,
+            )
+            return
+        self.pg_interface.update_battery(max(0, min(100, battery)))
 
     def tick(self):
         self.pg_interface.tick()
@@ -419,6 +436,15 @@ class ControlStation(Node):
         self.declare_parameter("cmd_topic_name", "/cmd_vel")
         self.declare_parameter("key_pressed_topic_name", "/key_pressed")
         self.declare_parameter("battery_level_topic_name", "/flight_data")
+        # Message type and field (0-100 %) of the battery topic
+        self.declare_parameter("battery_msg_type", "tello_msgs/msg/FlightStats")
+        self.declare_parameter("battery_field", "battery_percentage")
+        self.battery_msg_type = (
+            self.get_parameter("battery_msg_type").get_parameter_value().string_value
+        )
+        self.battery_field = (
+            self.get_parameter("battery_field").get_parameter_value().string_value
+        )
         self.declare_parameter("cam_image_topic_name", "/camera/image_raw")
         self.declare_parameter("land_topic_name", "/land")
         self.declare_parameter("takeoff_topic_name", "/takeoff")
