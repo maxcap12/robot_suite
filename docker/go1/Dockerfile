@@ -41,5 +41,10 @@ RUN echo "#!/bin/bash" >> /entrypoint.sh \
     && echo 'exec "$@"' >> /entrypoint.sh \
     && chmod a+x /entrypoint.sh
 
+# `docker stop` / `docker compose stop` / Ctrl+C on `docker compose up` send SIGTERM by default,
+# which ros2 launch ignores here: Docker then kills everything after 10 s and the Go1 driver
+# never stands the robot down nor enables damping. SIGINT behaves like Ctrl+C on ros2 launch.
+STOPSIGNAL SIGINT
+
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["bash"]
