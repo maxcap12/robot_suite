@@ -211,6 +211,28 @@ function tello_install() {
     git clone https://github.com/snt-arg/tello_ros2_driver.git drivers/tello_ros2_driver
 }
 
+function go1_install() {
+    # tello_control_station (used as UI to switch control modes) depends on tello_msgs,
+    # which lives in the tello_ros2_driver repo. Only tello_msgs is built, not the Tello driver.
+    print_info "Cloning tello_ros2_driver into drivers/ (for tello_msgs only)"
+    if [ ! -d drivers/tello_ros2_driver ]; then
+        git clone https://github.com/snt-arg/tello_ros2_driver.git drivers/tello_ros2_driver
+    fi
+    touch drivers/tello_ros2_driver/tello_driver/COLCON_IGNORE
+
+    # Go1 driver (https://github.com/snt-arg/unitree_ros), pinned for reproducibility.
+    # Its unitree_legged_sdk dependency is a git submodule.
+    print_info "Cloning unitree_ros (Go1 driver) into drivers/"
+    if [ ! -d drivers/unitree_ros ]; then
+        git clone --recurse-submodules https://github.com/snt-arg/unitree_ros.git drivers/unitree_ros
+        git -C drivers/unitree_ros checkout "${UNITREE_ROS_VERSION:-2e8c3e0}"
+        git -C drivers/unitree_ros submodule update --init --recursive
+    fi
+
+    print_info "Installing RealSense ROS 2 driver"
+    sudo apt install -y "ros-${ros_distro}-realsense2-camera"
+}
+
 function spot_install() {
     print_info "Installing Spot driver 2"
 
@@ -309,9 +331,14 @@ case "$1" in
         print_info "Building suite"
         python3 -m colcon build --symlink-install
         ;;
-    unitree_go1)
-        echo "Not yet supported,"
-        exit 1
+    go1|unitree_go1)
+        # Installs the suite + the Go1 driver (unitree_ros) + the RealSense driver.
+        is_ros_installed
+        go1_install
+        common_install
+
+        print_info "Building suite"
+        python3 -m colcon build --symlink-install
         ;;
     *)
         echo "Unknown robot: $1."

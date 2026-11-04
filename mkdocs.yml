@@ -67,6 +67,7 @@ nav:
     - 🚀 Getting Started:
           - Installation: GettingStarted/installation.md
           - Docker: GettingStarted/docker.md
+          - Go1 Hand Control (Docker): GettingStarted/go1_hand_control.md
           - Launch Guide: GettingStarted/launch_guide.md
           - Contribute: GettingStarted/contribute.md
     - 📦 Packages:

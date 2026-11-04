@@ -48,7 +48,7 @@ The robot type needs to be specified as an argument to the script. The available
 
 - `tello`: for the Tello drone
 - `spot`: for the Spot robot
-- `unitree_go1`: for the Unitree Go1 robot (Not yet supported)
+- `go1`: for the Unitree Go1 robot (includes the [unitree_ros](https://github.com/snt-arg/unitree_ros) driver)
 
 ```bash
 sudo ./bootstrap.sh [robot]

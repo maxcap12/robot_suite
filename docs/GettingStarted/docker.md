@@ -6,7 +6,7 @@ The main configuration file is `docker-compose.yml`, which defines a separate **
 
 !!! note
 
-    Currently, only the **Tello** and **Spot** robot platforms are supported.
+    Currently, the **Tello**, **Spot** and **Unitree Go1** robot platforms are supported.
 
 ## 🚀 Getting Started
 
@@ -48,7 +48,7 @@ The main configuration file is `docker-compose.yml`, which defines a separate **
 
 **Available Platforms** <a id="available-platforms"></a>
 
-Currently, dedicated Docker services (and corresponding containers) are available only for **tello** and **spot**.
+Currently, dedicated Docker services (and corresponding containers) are available for **tello**, **spot** and **go1**.
 
 - **tello**:
     ```bash
@@ -56,6 +56,13 @@ Currently, dedicated Docker services (and corresponding containers) are availabl
     ```
 
     This should automatically start a container and launch the driver, plugins and behaviour tree for the Tello.
+
+- **go1** (Unitree Go1, hand gesture control):
+    ```bash
+    docker compose up go1_suite
+    ```
+
+    This starts the Go1 driver, the RealSense camera and the hand gesture control. See the [Go1 Hand Control](go1_hand_control.md) page for the full setup.
 
 ### Manual Docker Usage (Advanced)
 
@@ -70,6 +77,7 @@ Each robot platform has its own `Dockerfile` located at:
 
     - tello
     - spot
+    - go1
 
 **Steps**:
 

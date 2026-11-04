@@ -33,3 +33,23 @@ services:
         tty: true
         stdin_open: true
         command: "ros2 launch robot_bringup spot_launch.py"
+    go1_suite:
+        image: robot_suite:go1
+        container_name: go1_suite
+        build:
+            context: .
+            dockerfile: ./docker/go1/Dockerfile
+        environment:
+            - DISPLAY=${DISPLAY}
+            - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+            - FASTDDS_BUILTIN_TRANSPORTS=UDPv4 # avoid shared-memory issues with other containers
+            #- RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+        volumes:
+            - /tmp/.X11-unix:/tmp/.X11-unix
+            - /dev:/dev # RealSense (USB, hot-plug)
+        privileged: true # needed for the RealSense USB access
+        network_mode: "host"
+        ipc: host
+        tty: true
+        stdin_open: true
+        command: "ros2 launch robot_bringup go1_launch.py"
