@@ -32,8 +32,8 @@ Files involved in this repo:
 - An X display for the control station window (works on X11 and on Wayland through XWayland).
 - An **Intel RealSense** camera plugged into the host (USB 3).
 - Network access to the Go1:
-    - Ethernet: the host needs an address in `192.168.123.0/24` (robot at `192.168.123.161`),
-    - Wi‑Fi: connect to the Go1 hotspot (robot at `192.168.12.1`) and launch with `wifi:=true`.
+    - Wi‑Fi (default): connect to the Go1 hotspot (robot at `192.168.12.1`),
+    - Ethernet: the host needs an address in `192.168.123.0/24` (robot at `192.168.123.161`) and you launch with `wifi:=false`.
 
 ## 2. Go1 driver
 
@@ -92,7 +92,7 @@ The first build takes a while (PyTorch, MediaPipe, ...). Later builds reuse the 
     | Argument | Default | Description |
     | -------- | ------- | ----------- |
     | `use_driver` | `true` | Start the Go1 driver. Set to `false` if it runs elsewhere. |
-    | `wifi` | `false` | Connect to the robot over Wi‑Fi (`192.168.12.1`) instead of Ethernet (`192.168.123.161`). |
+    | `wifi` | `true` | Connect to the robot over Wi‑Fi (`192.168.12.1`). Set to `false` for Ethernet (`192.168.123.161`). |
     | `use_realsense` | `true` | Start the RealSense driver. Set to `false` if another node publishes the images. |
     | `use_control_station` | `true` | Start the pygame UI (needs a display). |
 
@@ -167,7 +167,7 @@ ros2 topic pub -r 10 /hand/landmarks hand_gestures_msgs/msg/Landmarks \
 | `Authorization required, but no authorization protocol specified`, `cannot open display` / no control station window | Check that `DISPLAY` and `XAUTHORITY` are set in the shell running `docker compose` (not with `sudo`, which drops them), or run `xhost +local:docker` on the host. Recreate the container after logging in again (`docker compose up --force-recreate go1_suite`): the cookie file changes at each login on Wayland. |
 | Logs flooded with the behaviour tree | Set `print_tree: true` only for debugging in `robot_bringup/config/go1_params.yaml` (`bt_server`), it prints the whole tree at every tick. |
 | RealSense not found | Plug it in **before** starting the container or restart it (`docker compose restart go1_suite`). Check with `rs-enumerate-devices` or `lsusb` inside the container. Use a USB 3 port/cable. |
-| Driver log shows `CONNECTION IS NOT AVAILABLE` and `process has died` | The robot is not reachable: check the cable/Wi‑Fi and `ping` the robot, use `wifi:=true` for Wi‑Fi, then restart the container. |
+| Driver log shows `CONNECTION IS NOT AVAILABLE` and `process has died` | The robot is not reachable: check the cable/Wi‑Fi and `ping` the robot, use `wifi:=false` for Ethernet, then restart the container. |
 | Driver running elsewhere doesn't receive commands | Same `ROS_DOMAIN_ID` on both sides, both with `--net=host`. See the notes in [Go1 driver](#2-go1-driver). |
 | Other robots/people on the same network receive the commands | Use a dedicated `ROS_DOMAIN_ID` (e.g. `ROS_DOMAIN_ID=42 docker compose up go1_suite`). |
 | Robot stands up abruptly / looks unstable when standing up | Something else publishes `/cmd_vel` continuously (check `ros2 topic info /cmd_vel -v`): any `/cmd_vel` interrupts the stand-up motion. |

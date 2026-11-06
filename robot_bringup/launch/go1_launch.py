@@ -1,7 +1,7 @@
 """Bringup for the Unitree Go1 with hand gesture control.
 
 Launches:
-    - Go1 driver unitree_ros (optional, `use_driver:=false` to disable, `wifi:=true` for Wi-Fi)
+    - Go1 driver unitree_ros (optional, `use_driver:=false` to disable, `wifi:=false` for Ethernet)
     - RealSense camera driver (optional, `use_realsense:=false` to disable)
     - robot_bt behaviour tree server (go1_bt)
     - hand_gestures plugin (detector + annotator)
@@ -37,8 +37,8 @@ def create_go1_driver_launch(ld: LaunchDescription) -> None:
     ld.add_action(
         DeclareLaunchArgument(
             "wifi",
-            default_value="false",
-            description="Connect to the Go1 over Wi-Fi (192.168.12.1) instead of Ethernet (192.168.123.161)",
+            default_value="true",
+            description="Connect to the Go1 over Wi-Fi (192.168.12.1). Set to false for Ethernet (192.168.123.161)",
         )
     )
     unitree_pkg_dir = get_package_share_directory("unitree_ros")
